@@ -54,7 +54,9 @@
 
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, 
 		 terminate/2]).
--export([request/4, update/4, subscribe/3, lookup/2, deltas/3]).
+
+-export([start_link/0, start/0]).
+-export([request/3, update/3, subscribe/2, lookup/1, deltas/2]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% Record Definitions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -67,21 +69,30 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Public API %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+start() ->
+    gen_server:start({local, ?MODULE}, ?MODULE, [], []).
+
 %% request something from the origin of this point
-request(Hub, Path, Request, Auth) ->
-	{ok, Origin} = gen_server:call(Hub, {get_origin, Path}),
-	gen_server:call(Origin, {request, Request, Auth, self(), Hub, Path}).
+request(Path, Request, Auth) ->
+	{ok, Origin} = gen_server:call(?MODULE, {get_origin, Path}),
+	gen_server:call(Origin, {request, Request, Auth, self(), ?MODULE, Path}).
 
 %% update the hub's dictionary tree and send notifications
-update(Hub, Path, Changes, Auth) ->
-	gen_server:call(Hub, {update, Path, Changes, Auth}).
+update(Path, Changes, Auth) ->
+	gen_server:call(?MODULE, {update, Path, Changes, Auth}).
 
 %% get informed when something happens to this point or children
-subscribe(Hub, Path, SubscriptionOpts) ->
-	gen_server:call(Hub, {subscribe, Path, SubscriptionOpts}).
+subscribe(Path, SubscriptionOpts) ->
+	gen_server:call(?MODULE, {subscribe, Path, SubscriptionOpts}).
 
-lookup(Hub, Path) 			-> gen_server:call(Hub, {lookup, Path}).		
-deltas(Hub, Seq, Path) 		-> gen_server:call(Hub, {deltas, Seq, Path}).		
+lookup(Path) ->
+	gen_server:call(?MODULE, {lookup, Path}).		
+
+deltas(Seq, Path) -> 
+	gen_server:call(?MODULE, {deltas, Seq, Path}).		
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% gen_server callbacks %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -133,7 +144,9 @@ handle_call({lookup, Path}, _From, State) ->
 	{reply, do_lookup(Path, State#state.dtree), State};
 
 handle_call({deltas, Seq, Path}, _From, State) -> 
-	{reply, do_deltas(Seq, Path, State#state.dtree), State}.
+	{reply, 
+		{State#state.gtseq, do_deltas(Seq, Path, State#state.dtree)}, 
+		State}.
 	
 %%%%%%%%%%%%%%%%%%%%%%%%%% state tree implementation %%%%%%%%%%%%%%%%%%%%%%%%%
 
