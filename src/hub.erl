@@ -56,7 +56,9 @@
 		 terminate/2]).
 
 -export([start_link/0, start/0]).
--export([request/3, update/3, subscribe/2, lookup/1, deltas/2]).
+-export([request/3, update/2, update/3, 
+	     subscribe/2, unsubscribe/1, 
+		 fetch/0, fetch/1, dump/0, dump/1, deltas/1, deltas/2]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% Record Definitions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -81,18 +83,25 @@ request(Path, Request, Auth) ->
 	gen_server:call(Origin, {request, Request, Auth, self(), ?MODULE, Path}).
 
 %% update the hub's dictionary tree and send notifications
-update(Path, Changes, Auth) ->
-	gen_server:call(?MODULE, {update, Path, Changes, Auth}).
+update(Path, Changes, Context) ->
+	gen_server:call(?MODULE, {update, Path, Changes, Context}).
+
+update(Path, Changes) -> 	update(Path, Changes, []).
 
 %% get informed when something happens to this point or children
-subscribe(Path, SubscriptionOpts) ->
-	gen_server:call(?MODULE, {subscribe, Path, SubscriptionOpts}).
+subscribe(Path, Subscription) ->
+	gen_server:call(?MODULE, {subscribe, Path, Subscription}).
 
-lookup(Path) ->
-	gen_server:call(?MODULE, {lookup, Path}).		
+%% remove the calling process from the subscription list for that path
+unsubscribe(Path) ->
+	gen_server:call(?MODULE, {unsubscribe, Path}).
 
-deltas(Seq, Path) -> 
-	gen_server:call(?MODULE, {deltas, Seq, Path}).		
+dump(Path) ->			gen_server:call(?MODULE, {dump, Path}).		
+dump() -> 				dump([]).
+fetch(Path) ->			deltas(0, Path).
+fetch() -> 				fetch([]).
+deltas(Seq, Path) -> 	gen_server:call(?MODULE, {deltas, Seq, Path}).		
+deltas(Seq) -> 			deltas(Seq, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% gen_server callbacks %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -120,10 +129,19 @@ handle_call(terminate, _From, State) ->
 	{stop, normal, ok, State};
 
 handle_call({subscribe, Path, Opts}, From, State) ->
-	Seq = State#state.gtseq + 1,
-	case add_subscription(Path, {From, Opts}, State#state.dtree, Seq) of
-		{ok, Tnew} -> {reply, ok, State#state{dtree=Tnew, gtseq=Seq}};
-		_ -> {reply, error, State}
+	case do_subscribe(Path, {From, Opts}, State#state.dtree) of
+		Tnew when is_list(Tnew) -> 
+			{reply, ok, State#state{dtree=Tnew}};
+		_ -> 
+			{reply, error, State}
+	end;
+
+handle_call({unsubscribe, Path}, From, State) ->
+	case do_unsubscribe(Path, From, State#state.dtree) of
+		Tnew when is_list(Tnew) -> 
+			{reply, ok, State#state{dtree=Tnew}};
+		_ -> 
+			{reply, error, State}
 	end;
 
 handle_call({request, _Key, _Req}, _From, State) -> 
@@ -140,8 +158,10 @@ handle_call({update, Path, ProposedChanges, Auth}, From, State) ->
 		{changes, ResultingChanges}, 
 		State#state{dtree=NewTree, gtseq=Seq}};
 	
-handle_call({lookup, Path}, _From, State) -> 
-	{reply, do_lookup(Path, State#state.dtree), State};
+handle_call({dump, Path}, _From, State) -> 
+	{reply, 
+		{State#state.gtseq, do_dump(Path, State#state.dtree)}, 
+		State};
 
 handle_call({deltas, Seq, Path}, _From, State) -> 
 	{reply, 
@@ -150,7 +170,7 @@ handle_call({deltas, Seq, Path}, _From, State) ->
 	
 %%%%%%%%%%%%%%%%%%%%%%%%%% state tree implementation %%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% add_subscription(Path, Subscription, Tree)
+%% do_subscribe(Path, Subscription, Tree)
 %% 
 %% Subscription is a {From, SubscribeParameters} tuple that is placed on
 %% the subs@ key at a node in the dtree.  Adding a subscription doesn't
@@ -160,23 +180,34 @@ handle_call({deltas, Seq, Path}, _From, State) ->
 %% passing something like {append, Subscription, [notifications, false]}
 %% as the value, or maybe something like a function as the value!!! cool?
 
-add_subscription([], Subscription, T, Seq) ->
-	Subs = case orddict:find(subs@, T) of 
-		{ok, {L, _Seq}} -> L;
-		_ -> orddict:new()
+do_subscribe([], {From, Opts}, Tree) ->
+	{FromPid, _Ref} = From,
+	Subs = case orddict:find(subs@, Tree) of 
+		{ok, L} when is_list(L) -> 
+			orddict:store(FromPid, Opts, L);
+		_ -> 
+			orddict:store(FromPid, Opts, orddict:new())
 	end,
-	{ok, orddict:store(subs@, {(Subs ++ [Subscription]), Seq}, T)};
+	orddict:store(subs@, Subs, Tree);
 		
-add_subscription([PH|PT], Subscription, T, Seq) -> 
-	case orddict:find(PH, T) of 
-		{ok, {ST, _Seq}} when is_list(ST) ->
-			case add_subscription(PT, Subscription, ST, Seq) of
-				{ok, STnew} ->
-					{ok, orddict:store(PH, {STnew, Seq}, T)};
-				_ -> error
-			end;
-		error -> error
-	end.
+do_subscribe([PH|PT], {From, Opts}, Tree) -> 
+	{ok, {Seq, ST}} = orddict:find(PH, Tree),
+	STnew = do_subscribe(PT, {From, Opts}, ST),
+	orddict:store(PH, {Seq, STnew}, Tree).
+
+%% do_unsubscirbe(Path, Unsubscriber, Tree) -> Tree | notfound
+%%
+%% removes Unsubscriber from the dictionary tree
+
+do_unsubscribe([], Unsub, Tree) ->
+	{FromPid, _Ref} = Unsub,
+	{ok, OldSubs} = orddict:find(subs@, Tree),
+	orddict:store(subs@, orddict:erase(FromPid, OldSubs), Tree);
+
+do_unsubscribe([PH|PT], Unsub, Tree) ->
+	{ok, {Seq, ST}} = orddict:find(PH, Tree),
+	STnew = do_unsubscribe(PT, Unsub, ST),
+	orddict:store(PH, {Seq, STnew}, Tree).
 
 %% update(PathList,ProposedChanges,Tree,Context) -> {ResultingChanges,NewTree}
 %%
@@ -192,14 +223,14 @@ do_update([], PC, T, C) ->
 	%io:format("update([],~p,~p)\n\n", [PC, T]),
     UF = fun(Key, Value, {RC, Dict}) -> % {RC, Dict}
         case orddict:find(Key, Dict) of  
-            {ok, {Value, _}} ->		% already the value we are setting
+            {ok, {_, Value}} ->		% already the value we are setting
 				{RC, Dict};
             _Else when is_list(Value) -> 	% we're setting a proplist
 				{RCsub, NewDict} = do_update([Key], Value, Dict, C),
 				{(RC++RCsub), NewDict};
 			_Else -> 
 				{Seq, _} = C, 
-				{(RC++[{Key, Value}]), orddict:store(Key,{Value, Seq},Dict)}
+				{(RC++[{Key, Value}]), orddict:store(Key, {Seq, Value}, Dict)}
         end
     end,
     { CL, Tnew } = orddict:fold(UF, {[], T}, PC),
@@ -209,7 +240,7 @@ do_update([], PC, T, C) ->
 do_update([PH|PT], PC, T, C) ->
 	% we still have a path, so update a subtree of the given tree
 	ST = case orddict:find(PH, T) of 
-		{ok, {L, _}} when is_list(L) ->  L;	% found existing subtree
+		{ok, {_Seq, L}} when is_list(L) ->  L;	% found existing subtree
 		{ok, _} -> 	% replace current non-list value with new subtree
 			orddict:new();  
 		error -> 	% add new subtree (key didn't exist before)
@@ -224,23 +255,19 @@ do_update([PH|PT], PC, T, C) ->
 	% store sequence number for this change
 	{Seq, _} = C, 
 	% store new subtree and sequence number 
-	T1 = orddict:store(PH, {STnew, Seq}, T),
+	T1 = orddict:store(PH, {Seq, STnew}, T),
 	send_notifications(RC, T1, C),
 	{ RC, T1 }.
 
-%% do_lookup(Path, Tree) -> Tree
+%% do_dump(Path, Tree) -> Tree
 %%
 %% Lookup the state dictionary tree at a given path.  Returns the entire
 %% tree, including subscription and version information.
 
-do_lookup([], Tree) -> 
-	Tree;
-	
-do_lookup([PH|PT], Tree) ->
-	case orddict:find(PH, Tree) of
-		{ok, {SubTree, _V}} -> do_lookup(PT, SubTree);
-		_Else -> error
-	end.
+do_dump([], Tree) -> Tree;	
+do_dump([PH|PT], Tree) ->
+	{ok, {_Seq, SubTree}} = orddict:find(PH, Tree),
+	do_dump(PT, SubTree).
 
 %% do_deltas(Since, Path, Tree) -> ChangeTree
 %%
@@ -249,12 +276,21 @@ do_lookup([PH|PT], Tree) ->
 
 do_deltas(Since, [], Tree) ->
 	% FN to filter a list of nodes whose seq# is higher than Since
-	FNfilter = fun(_Key, {_Val, Seq}) -> (Seq > Since) end,
-    % function to map subnodes to recurse to do_deltas
-	FNrecurse = fun(Key, {Val, _Seq}) ->
+	% also removing subscription nodes REVIEW: likely should be an option?
+	FNfilter = fun(Key, Val) ->
 		case {Key, Val} of 
-			{subs@, _} ->  Val;
-			{_, L} when is_list(L) -> do_deltas(Since, [], L);
+			{Key, {Seq, _Val}} -> (Seq > Since);
+			{subs@, _} -> false;
+			_ -> true
+		end
+	end,
+    % function to map subnodes to recurse to do_deltas
+	FNrecurse = fun(Key, {_Seq, Val}) ->
+		case {Key, Val} of 
+			{subs@, _} -> 
+				Val;
+			{_, L} when is_list(L) -> 
+				do_deltas(Since, [], L);
 			_ -> Val
 		end
 	end,
@@ -262,25 +298,19 @@ do_deltas(Since, [], Tree) ->
 
 do_deltas(Since, [PH|PT], Tree) ->
 	case orddict:find(PH, Tree) of
-		{ok, {SubTree, _V}} -> do_deltas(Since, PT, SubTree);
+		{ok, {_Seq, SubTree}} -> do_deltas(Since, PT, SubTree);
 		_Else -> error
 	end.
 	
 %% send notifications about some changes to subscribers
 
-send_notifications([], _, _) ->
-	pass;
+send_notifications([], _, _) ->	pass;   % don't send empty notifications
 
 send_notifications(Changes, Tree, Context) ->
 	case orddict:find(subs@, Tree) of
-		{ok, {Subs, _}} when is_list(Subs) ->
-			lists:map(fun(Sub)-> notify_sub(Sub, Changes, Context) end, Subs);
+		{ok, Subs} when is_list(Subs) ->
+			orddict:map(fun(Pid, Opts) -> 
+			    Pid ! {notify, Opts, Changes, Context}
+			end, Subs);
 		_ -> pass
 	end.	
-
-%% decalled by send_notifications to notify this subscription of activity
-%% that is relevant to it
-notify_sub(Subscription, Changes, Context) ->
-    {{ Pid, _Key }, SubscriptionInfo} = Subscription,
-    Pid ! {notify, SubscriptionInfo, Changes, Context}.
-
