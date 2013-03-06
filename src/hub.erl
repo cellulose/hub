@@ -1,6 +1,6 @@
-%% Module "hub"
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Module "hub"
 %%
-%% Implements a heirarchial key-value store with publish/subscribe semanitcs
+%% Implements a heirarchial key-value store with publish/watch semanitcs
 %% at each node of the heirarchy.   Plans to support timestamping, 
 %% version stamping, real-time playback, security,
 %%
@@ -9,7 +9,7 @@
 %% are any erlang term.  Sometimes the value is also a dnode, which results 
 %% in a heirarchy.
 %%
-%% Processes publish state on a hub, subscribe to state changes,
+%% Processes publish state on a hub, watch to state changes,
 %% request information about the state of the bus, and request changes
 %% to the state.
 %%
@@ -37,7 +37,7 @@
 %% some special keys that can appea
 %%
 %%	useq@		sequence ID of the last update to this resource
-%%	subs@		list of dependents to be informed
+%%	wch@		list of dependents to be informed
 %%
 %% LICENSE
 %%
@@ -56,9 +56,9 @@
 		 terminate/2]).
 
 -export([start_link/0, start/0]).
--export([request/3, update/2, update/3, 
-	     subscribe/2, unsubscribe/1, 
-		 fetch/0, fetch/1, dump/0, dump/1, deltas/1, deltas/2]).
+-export([request/2, request/3, update/2, update/3, watch/2, unwatch/1, 
+		 manage/2, manager/1, fetch/0, fetch/1, dump/0, dump/1, deltas/1, 
+		 deltas/2]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% Record Definitions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -71,48 +71,55 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Public API %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+%% initialization
 
-start() ->
-    gen_server:start({local, ?MODULE}, ?MODULE, [], []).
+start() ->    	gen_server:start({local, ?MODULE}, ?MODULE, [], []).
+start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% request something from the origin of this point
-request(Path, Request, Auth) ->
-	{ok, Origin} = gen_server:call(?MODULE, {get_origin, Path}),
-	gen_server:call(Origin, {request, Request, Auth, self(), ?MODULE, Path}).
+%% request something from the manager of this point.  Note that requests 
+%% are sent from the caller's process, so that they don't block the hub.
 
-%% update the hub's dictionary tree and send notifications
+request(Path, Request, Context) ->
+	{ok, {ManagerPID, _Opts}} = gen_server:call(?MODULE, {manager, Path}),
+	gen_server:call(ManagerPID, {request, Path, Request, Context}).
+
+request(Path, Request) ->
+	request(Path, Request, []).
+
+%% interfaces to updating state
+
+update(Path, Changes) -> 	update(Path, Changes, []).
 update(Path, Changes, Context) ->
 	gen_server:call(?MODULE, {update, Path, Changes, Context}).
 
-update(Path, Changes) -> 	update(Path, Changes, []).
+%% interfaces to specify ownership and watching
 
-%% get informed when something happens to this point or children
-subscribe(Path, Subscription) ->
-	gen_server:call(?MODULE, {subscribe, Path, Subscription}).
+manage(Path, Options) -> gen_server:call(?MODULE, {manage, Path, Options}).
 
-%% remove the calling process from the subscription list for that path
-unsubscribe(Path) ->
-	gen_server:call(?MODULE, {unsubscribe, Path}).
+manager(Path) -> gen_server:call(?MODULE, {manager, Path}).
+
+watch(Path, Options) ->	gen_server:call(?MODULE, {watch, Path, Options}).
+
+unwatch(Path) -> gen_server:call(?MODULE, {unwatch, Path}).
+
+%% interfaces to queries
 
 dump(Path) ->			gen_server:call(?MODULE, {dump, Path}).		
 dump() -> 				dump([]).
+
 fetch(Path) ->			deltas(0, Path).
 fetch() -> 				fetch([]).
+
 deltas(Seq, Path) -> 	gen_server:call(?MODULE, {deltas, Seq, Path}).		
 deltas(Seq) -> 			deltas(Seq, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% gen_server callbacks %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(_Args) -> 
-	{ok, #state{}}. 
+init(_Args) -> 	{ok, #state{}}. 
 
-terminate(normal, _State) ->
-	ok.
+terminate(normal, _State) -> ok.
 
-code_change(_OldVsn, State, _Extra) -> 
-	{ok, State}.
+code_change(_OldVsn, State, _Extra) -> 	{ok, State}.
 
 % handle_info/cast/call clauses, &  delegate for hub specific handlers
 
@@ -128,16 +135,27 @@ handle_cast(return, State) ->
 handle_call(terminate, _From, State) -> 
 	{stop, normal, ok, State};
 
-handle_call({subscribe, Path, Opts}, From, State) ->
-	case do_subscribe(Path, {From, Opts}, State#state.dtree) of
+handle_call({manage, Path, Opts}, From, State) ->
+	case do_manage(Path, {From, Opts}, State#state.dtree) of
 		Tnew when is_list(Tnew) -> 
 			{reply, ok, State#state{dtree=Tnew}};
 		_ -> 
 			{reply, error, State}
 	end;
 
-handle_call({unsubscribe, Path}, From, State) ->
-	case do_unsubscribe(Path, From, State#state.dtree) of
+handle_call({manager, Path}, _From, State) ->
+	{reply, do_manager(Path, State#state.dtree), State};
+
+handle_call({watch, Path, Opts}, From, State) ->
+	case do_watch(Path, {From, Opts}, State#state.dtree) of
+		Tnew when is_list(Tnew) -> 
+			{reply, ok, State#state{dtree=Tnew}};
+		_ -> 
+			{reply, error, State}
+	end;
+
+handle_call({unwatch, Path}, From, State) ->
+	case do_unwatch(Path, From, State#state.dtree) of
 		Tnew when is_list(Tnew) -> 
 			{reply, ok, State#state{dtree=Tnew}};
 		_ -> 
@@ -170,43 +188,65 @@ handle_call({deltas, Seq, Path}, _From, State) ->
 	
 %%%%%%%%%%%%%%%%%%%%%%%%%% state tree implementation %%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% do_subscribe(Path, Subscription, Tree)
+%% manage ownership of this point
+%%
+%% TODO: un-manage?  handle errors if already manageed?   Security?
+
+do_manage([], {{FromPid, _Ref}, Opts}, Tree) ->
+	orddict:store(mgr@, {FromPid, Opts}, Tree);
+			
+do_manage([PH|PT], {From, Opts}, Tree) -> 
+	{ok, {Seq, ST}} = orddict:find(PH, Tree),
+	STnew = do_manage(PT, {From, Opts}, ST),
+	orddict:store(PH, {Seq, STnew}, Tree).
+
+%% do_manager(Point, Tree) -> {ok, {Process, Options}} | undefined
+%%
+%% return the manageling process and options for a given point on the
+%% dictionary tree, if the manager was set by do_manage(...).
+
+do_manager([], Tree) -> orddict:find(mgr@, Tree);
+do_manager([PH|PT], Tree) ->
+	{ok, {_Seq, SubTree}} = orddict:find(PH, Tree),
+	do_manager(PT, SubTree).
+
+%% do_watch(Path, Subscription, Tree)
 %% 
-%% Subscription is a {From, SubscribeParameters} tuple that is placed on
-%% the subs@ key at a node in the dtree.  Adding a subscription doesn't
+%% Subscription is a {From, watchParameters} tuple that is placed on
+%% the wch@ key at a node in the dtree.  Adding a subscription doesn't
 %% currently cause any notificaitions, although that might change.
 %%
 %% REVIEW: could eventually be implemented as a special form of update by
 %% passing something like {append, Subscription, [notifications, false]}
 %% as the value, or maybe something like a function as the value!!! cool?
 
-do_subscribe([], {From, Opts}, Tree) ->
+do_watch([], {From, Opts}, Tree) ->
 	{FromPid, _Ref} = From,
-	Subs = case orddict:find(subs@, Tree) of 
+	Subs = case orddict:find(wch@, Tree) of 
 		{ok, L} when is_list(L) -> 
 			orddict:store(FromPid, Opts, L);
 		_ -> 
 			orddict:store(FromPid, Opts, orddict:new())
 	end,
-	orddict:store(subs@, Subs, Tree);
+	orddict:store(wch@, Subs, Tree);
 		
-do_subscribe([PH|PT], {From, Opts}, Tree) -> 
+do_watch([PH|PT], {From, Opts}, Tree) -> 
 	{ok, {Seq, ST}} = orddict:find(PH, Tree),
-	STnew = do_subscribe(PT, {From, Opts}, ST),
+	STnew = do_watch(PT, {From, Opts}, ST),
 	orddict:store(PH, {Seq, STnew}, Tree).
 
-%% do_unsubscirbe(Path, Unsubscriber, Tree) -> Tree | notfound
+%% do_unwatch(Path, releaser, Tree) -> Tree | notfound
 %%
-%% removes Unsubscriber from the dictionary tree
+%% removes releaser from the dictionary tree
 
-do_unsubscribe([], Unsub, Tree) ->
+do_unwatch([], Unsub, Tree) ->
 	{FromPid, _Ref} = Unsub,
-	{ok, OldSubs} = orddict:find(subs@, Tree),
-	orddict:store(subs@, orddict:erase(FromPid, OldSubs), Tree);
+	{ok, OldSubs} = orddict:find(wch@, Tree),
+	orddict:store(wch@, orddict:erase(FromPid, OldSubs), Tree);
 
-do_unsubscribe([PH|PT], Unsub, Tree) ->
+do_unwatch([PH|PT], Unsub, Tree) ->
 	{ok, {Seq, ST}} = orddict:find(PH, Tree),
-	STnew = do_unsubscribe(PT, Unsub, ST),
+	STnew = do_unwatch(PT, Unsub, ST),
 	orddict:store(PH, {Seq, STnew}, Tree).
 
 %% update(PathList,ProposedChanges,Tree,Context) -> {ResultingChanges,NewTree}
@@ -279,16 +319,17 @@ do_deltas(Since, [], Tree) ->
 	% also removing subscription nodes REVIEW: likely should be an option?
 	FNfilter = fun(Key, Val) ->
 		case {Key, Val} of 
+			{mgr@, _} -> false;
+			{wch@, _} -> false;
 			{Key, {Seq, _Val}} -> (Seq > Since);
-			{subs@, _} -> false;
 			_ -> true
 		end
 	end,
     % function to map subnodes to recurse to do_deltas
 	FNrecurse = fun(Key, {_Seq, Val}) ->
 		case {Key, Val} of 
-			{subs@, _} -> 
-				Val;
+			{wch@, _} -> Val;
+			{mgr@, _} -> Val;
 			{_, L} when is_list(L) -> 
 				do_deltas(Since, [], L);
 			_ -> Val
@@ -298,16 +339,19 @@ do_deltas(Since, [], Tree) ->
 
 do_deltas(Since, [PH|PT], Tree) ->
 	case orddict:find(PH, Tree) of
-		{ok, {_Seq, SubTree}} -> do_deltas(Since, PT, SubTree);
+		{ok, {_Seq, SubTree}} when is_list(SubTree) -> 
+			do_deltas(Since, PT, SubTree);
 		_Else -> error
 	end.
-	
-%% send notifications about some changes to subscribers
 
-send_notifications([], _, _) ->	pass;   % don't send empty notifications
+%% called by do_update to send notification to watchers (wch@).
+%%	
+%% send notifications about some changes to watchrs.   If nothing changed,
+%% then don't send any notifications.
 
+send_notifications([], _, _) ->	pass;
 send_notifications(Changes, Tree, Context) ->
-	case orddict:find(subs@, Tree) of
+	case orddict:find(wch@, Tree) of
 		{ok, Subs} when is_list(Subs) ->
 			orddict:map(fun(Pid, Opts) -> 
 			    Pid ! {notify, Opts, Changes, Context}
