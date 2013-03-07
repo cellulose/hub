@@ -148,18 +148,18 @@ handle_call({manager, Path}, _From, State) ->
 
 handle_call({watch, Path, Opts}, From, State) ->
 	case do_watch(Path, {From, Opts}, State#state.dtree) of
-		Tnew when is_list(Tnew) -> 
+		{ok, Tnew} when is_list(Tnew) -> 
 			{reply, ok, State#state{dtree=Tnew}};
-		_ -> 
-			{reply, error, State}
+		{error, Reason} -> 
+			{reply, {error, Reason}, State}
 	end;
 
 handle_call({unwatch, Path}, From, State) ->
 	case do_unwatch(Path, From, State#state.dtree) of
-		Tnew when is_list(Tnew) -> 
+		{ok, Tnew} when is_list(Tnew) -> 
 			{reply, ok, State#state{dtree=Tnew}};
-		_ -> 
-			{reply, error, State}
+		{error, Reason} -> 
+			{reply, {error, Reason}, State}
 	end;
 
 handle_call({request, _Key, _Req}, _From, State) -> 
@@ -228,12 +228,17 @@ do_watch([], {From, Opts}, Tree) ->
 		_ -> 
 			orddict:store(FromPid, Opts, orddict:new())
 	end,
-	orddict:store(wch@, Subs, Tree);
+	{ok, orddict:store(wch@, Subs, Tree)};
 		
 do_watch([PH|PT], {From, Opts}, Tree) -> 
-	{ok, {Seq, ST}} = orddict:find(PH, Tree),
-	STnew = do_watch(PT, {From, Opts}, ST),
-	orddict:store(PH, {Seq, STnew}, Tree).
+	case orddict:find(PH, Tree) of 
+		{ok, {Seq, ST}} ->
+			case do_watch(PT, {From, Opts}, ST) of 
+				{error, Reason} -> {error, Reason};
+				{ok, STnew} -> {ok, orddict:store(PH, {Seq, STnew}, Tree)}
+			end;
+		_ -> {error, nopoint}
+	end.
 
 %% do_unwatch(Path, releaser, Tree) -> Tree | notfound
 %%
@@ -242,13 +247,18 @@ do_watch([PH|PT], {From, Opts}, Tree) ->
 do_unwatch([], Unsub, Tree) ->
 	{FromPid, _Ref} = Unsub,
 	{ok, OldSubs} = orddict:find(wch@, Tree),
-	orddict:store(wch@, orddict:erase(FromPid, OldSubs), Tree);
+	{ok, orddict:store(wch@, orddict:erase(FromPid, OldSubs), Tree)};
 
 do_unwatch([PH|PT], Unsub, Tree) ->
-	{ok, {Seq, ST}} = orddict:find(PH, Tree),
-	STnew = do_unwatch(PT, Unsub, ST),
-	orddict:store(PH, {Seq, STnew}, Tree).
-
+	case orddict:find(PH, Tree) of 
+		{ok, {Seq, ST}} ->
+			case do_unwatch(PT, Unsub, ST) of 
+				{error, Reason} -> {error, Reason};	
+				{ok, STnew} -> {ok, orddict:store(PH, {Seq, STnew}, Tree)}
+			end;
+		_ -> {error, nopoint}
+	end.
+		
 %% update(PathList,ProposedChanges,Tree,Context) -> {ResultingChanges,NewTree}
 %%
 %% Coding Abbreviations:
