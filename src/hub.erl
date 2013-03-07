@@ -88,7 +88,7 @@ request(Path, Request) ->
 
 %% interfaces to updating state
 
-update(Path, Changes) -> 	update(Path, Changes, []).
+update(Path, Changes) -> update(Path, Changes, []).
 update(Path, Changes, Context) ->
 	gen_server:call(?MODULE, {update, Path, Changes, Context}).
 
@@ -205,7 +205,9 @@ do_manage([PH|PT], {From, Opts}, Tree) ->
 %% return the manageling process and options for a given point on the
 %% dictionary tree, if the manager was set by do_manage(...).
 
-do_manager([], Tree) -> orddict:find(mgr@, Tree);
+do_manager([], Tree) -> 
+	orddict:find(mgr@, Tree);
+
 do_manager([PH|PT], Tree) ->
 	{ok, {_Seq, SubTree}} = orddict:find(PH, Tree),
 	do_manager(PT, SubTree).
@@ -323,6 +325,7 @@ do_dump([PH|PT], Tree) ->
 %%
 %% returns a tree of changes that happened since the specified sequence.
 %% if a non-empty path is specified, returns changes relative to that path.
+%% returns these in a jiffy-compatible structure
 
 do_deltas(Since, [], Tree) ->
 	% FN to filter a list of nodes whose seq# is higher than Since
@@ -345,7 +348,7 @@ do_deltas(Since, [], Tree) ->
 			_ -> Val
 		end
 	end,
-	orddict:map(FNrecurse, orddict:filter(FNfilter, Tree));
+	{ orddict:map(FNrecurse, orddict:filter(FNfilter, Tree)) };
 
 do_deltas(Since, [PH|PT], Tree) ->
 	case orddict:find(PH, Tree) of
