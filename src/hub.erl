@@ -39,6 +39,11 @@
 %%	useq@		sequence ID of the last update to this resource
 %%	wch@		list of dependents to be informed
 %%
+%% For convenience, you can pass in keys as atoms, but they will be converted
+%% to binary keys internally (all keys are stored as binaries).    They will
+%% be represented as binary keys when returned.  This behavior is under review
+%% so if you want to be sure, pass binary keys to begin with.
+%% 
 %% LICENSE
 %%
 %% Repurposed from RemoteRadio, (C) Copyright 1996-2012 Garth Hitchens, KG7GA,
@@ -58,7 +63,7 @@
 -export([start_link/0, start/0]).
 -export([request/2, request/3, update/2, update/3, watch/2, unwatch/1, 
 		 manage/2, manager/1, fetch/0, fetch/1, dump/0, dump/1, deltas/1, 
-		 deltas/2]).
+		 deltas/2, binarify/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% Record Definitions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -79,40 +84,70 @@ start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 %% request something from the manager of this point.  Note that requests 
 %% are sent from the caller's process, so that they don't block the hub.
 
-request(Path, Request, Context) ->
-	{ok, {ManagerPID, _Opts}} = gen_server:call(?MODULE, {manager, Path}),
-	gen_server:call(ManagerPID, {request, Path, Request, Context}).
-
 request(Path, Request) ->
 	request(Path, Request, []).
+  
+request(Path, Request, Context) ->
+  BinPath = binarify(Path),
+	{ok, {ManagerPID, _Opts}} = gen_server:call(?MODULE, {manager, BinPath}),
+	gen_server:call(ManagerPID, {request, BinPath, Request, Context}).
 
 %% interfaces to updating state
 
-update(Path, Changes) -> update(Path, Changes, []).
+update(Path, Changes) -> 
+  update(Path, Changes, []).
+
 update(Path, Changes, Context) ->
-	gen_server:call(?MODULE, {update, Path, Changes, Context}).
+	gen_server:call(?MODULE, {update, binarify(Path), Changes, Context}).
 
 %% interfaces to specify ownership and watching
 
-manage(Path, Options) -> gen_server:call(?MODULE, {manage, Path, Options}).
+manage(Path, Options) -> 
+  gen_server:call(?MODULE, {manage, binarify(Path), Options}).
 
-manager(Path) -> gen_server:call(?MODULE, {manager, Path}).
+manager(Path) -> 
+  gen_server:call(?MODULE, {manager, binarify(Path)}).
 
-watch(Path, Options) ->	gen_server:call(?MODULE, {watch, Path, Options}).
+watch(Path, Options) ->	
+  gen_server:call(?MODULE, {watch, binarify(Path), Options}).
 
-unwatch(Path) -> gen_server:call(?MODULE, {unwatch, Path}).
+unwatch(Path) -> 
+  gen_server:call(?MODULE, {unwatch, binarify(Path)}).
 
 %% interfaces to queries
 
-dump(Path) ->			gen_server:call(?MODULE, {dump, Path}).		
-dump() -> 				dump([]).
+dump() ->
+  dump([]).
 
-fetch(Path) ->			deltas(0, Path).
-fetch() -> 				fetch([]).
+dump(Path) ->			
+  gen_server:call(?MODULE, {dump, binarify(Path)}).		
 
-deltas(Seq, Path) -> 	gen_server:call(?MODULE, {deltas, Seq, Path}).		
-deltas(Seq) -> 			deltas(Seq, []).
+fetch() ->
+  fetch([]).
 
+fetch(Path) ->
+  deltas(0, Path).
+
+deltas(Seq) -> 
+  deltas(Seq, []).
+
+deltas(Seq, Path) -> 	
+  gen_server:call(?MODULE, {deltas, Seq, binarify(Path)}).		
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% helpers %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% binarify(KeyList)
+%%
+%% used primarily for converting keys in paths to binary keys rather than
+%% atoms, which allows atoms to be used as keys.
+
+binarify([H|T]) ->
+  [binarify(H)|binarify(T)];
+binarify(Atom) when is_atom(Atom) ->
+  atom_to_binary(Atom, utf8);
+binarify(SomethingElse) ->
+  SomethingElse.
+  
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% gen_server callbacks %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init(_Args) -> 	{ok, #state{}}. 
@@ -278,7 +313,7 @@ do_update([], PC, T, C) ->
             {ok, {_, Value}} ->		% already the value we are setting
 				{RC, Dict};
             _Else when is_list(Value) -> 	% we're setting a proplist
-				{RCsub, NewDict} = do_update([Key], Value, Dict, C),
+				{RCsub, NewDict} = do_update(binarify([Key]), Value, Dict, C),
 				{(RC++RCsub), NewDict};
 			_Else -> 
 				{Seq, _} = C, 
