@@ -51,6 +51,8 @@
 %% 
 %% License explicitly granted to Rose Point Navigation Systems, LLC, for use 
 %% in the NEMO network translator box.   For other uses contact the Author.
+%%
+%% vim:ts=4,sts=4
 
 -module(hub).
 -behaviour(gen_server).
