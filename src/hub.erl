@@ -64,7 +64,7 @@
 -export([start_link/0, start/0]).
 -export([request/2, request/3, update/2, update/3, watch/2, unwatch/1, 
          manage/2, manager/1, fetch/0, fetch/1, dump/0, dump/1, deltas/1, 
-         deltas/2, binarify/1]).
+         deltas/2, binarify/1, atomify/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% Record Definitions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -89,7 +89,7 @@ request(Path, Request) ->
     request(Path, Request, []).
   
 request(Path, Request, Context) ->
-  BinPath = binarify(Path),
+  BinPath = atomify(Path),
     {ok, {ManagerPID, _Opts}} = gen_server:call(?MODULE, {manager, BinPath}),
     gen_server:call(ManagerPID, {request, BinPath, Request, Context}).
 
@@ -99,21 +99,21 @@ update(Path, Changes) ->
   update(Path, Changes, []).
 
 update(Path, Changes, Context) ->
-    gen_server:call(?MODULE, {update, binarify(Path), Changes, Context}).
+    gen_server:call(?MODULE, {update, atomify(Path), Changes, Context}).
 
 %% interfaces to specify ownership and watching
 
 manage(Path, Options) -> 
-  gen_server:call(?MODULE, {manage, binarify(Path), Options}).
+  gen_server:call(?MODULE, {manage, atomify(Path), Options}).
 
 manager(Path) -> 
-  gen_server:call(?MODULE, {manager, binarify(Path)}).
+  gen_server:call(?MODULE, {manager, atomify(Path)}).
 
 watch(Path, Options) -> 
-  gen_server:call(?MODULE, {watch, binarify(Path), Options}).
+  gen_server:call(?MODULE, {watch, atomify(Path), Options}).
 
 unwatch(Path) -> 
-  gen_server:call(?MODULE, {unwatch, binarify(Path)}).
+  gen_server:call(?MODULE, {unwatch, atomify(Path)}).
 
 %% interfaces to queries
 
@@ -121,7 +121,7 @@ dump() ->
   dump([]).
 
 dump(Path) ->           
-  gen_server:call(?MODULE, {dump, binarify(Path)}).     
+  gen_server:call(?MODULE, {dump, atomify(Path)}).     
 
 fetch() ->
   fetch([]).
@@ -133,7 +133,7 @@ deltas(Seq) ->
   deltas(Seq, []).
 
 deltas(Seq, Path) ->    
-  gen_server:call(?MODULE, {deltas, Seq, binarify(Path)}).      
+  gen_server:call(?MODULE, {deltas, Seq, atomify(Path)}).      
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% helpers %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -148,6 +148,10 @@ binarify(Atom) when is_atom(Atom) ->
   atom_to_binary(Atom, utf8);
 binarify(SomethingElse) ->
   SomethingElse.
+  
+atomify([H|T]) -> [atomify(H)|atomify(T)];
+atomify(Bin) when is_binary(Bin) -> binary_to_atom(Bin, utf8);
+atomify(SomethingElse) -> SomethingElse.
   
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% gen_server callbacks %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -172,55 +176,82 @@ handle_call(terminate, _From, State) ->
     {stop, normal, ok, State};
 
 handle_call({manage, Path, Opts}, From, State) ->
-    case do_manage(Path, {From, Opts}, State#state.dtree) of
+    try do_manage(Path, {From, Opts}, State#state.dtree) of
         Tnew when is_list(Tnew) -> 
             {reply, ok, State#state{dtree=Tnew}};
         _ -> 
             {reply, error, State}
+    catch
+        Exception:Reason -> 
+            {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
 
 handle_call({manager, Path}, _From, State) ->
-    {reply, do_manager(Path, State#state.dtree), State};
+    try
+        {reply, do_manager(Path, State#state.dtree), State}
+    catch
+        Exception:Reason -> 
+            {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
+    end;
 
 handle_call({watch, Path, Opts}, From, State) ->
-    case do_watch(Path, {From, Opts}, State#state.dtree) of
+    try do_watch(Path, {From, Opts}, State#state.dtree) of
         {ok, Tnew} when is_list(Tnew) -> 
             {reply, ok, State#state{dtree=Tnew}};
         {error, Reason} -> 
             {reply, {error, Reason}, State}
+    catch
+        Exception:Reason -> 
+            {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
 
 handle_call({unwatch, Path}, From, State) ->
-    case do_unwatch(Path, From, State#state.dtree) of
+    try do_unwatch(Path, From, State#state.dtree) of
         {ok, Tnew} when is_list(Tnew) -> 
             {reply, ok, State#state{dtree=Tnew}};
         {error, Reason} -> 
             {reply, {error, Reason}, State}
+    catch
+        Exception:Reason -> 
+            {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
 
 handle_call({request, _Key, _Req}, _From, State) -> 
     {reply, ok, State};
 
-handle_call({update, Path, ProposedChanges, Auth}, From, State) ->
+%% Proposed     Proposed Changes
+%% Resulting    Resulting Changes
+handle_call({update, Path, Proposed, Auth}, From, State) ->
     Seq = State#state.gtseq + 1,
-    {ResultingChanges, NewTree} = do_update(
-        Path, 
-        ProposedChanges, 
-        State#state.dtree, 
-        {Seq, [{from, From}, {auth, Auth}]}),
-    {reply, 
-        {changes, Seq, ResultingChanges}, 
-        State#state{dtree=NewTree, gtseq=Seq}};
-    
+    Ctx = {Seq, [{from, From}, {auth, Auth}]},
+    try do_update(Path, Proposed, State#state.dtree, Ctx) of
+        {Changed, NewTree} ->
+            State2=State#state{dtree=NewTree, gtseq=Seq},
+            {reply, {changes, Seq, Changed}, State2}
+    catch
+        Exception:Reason -> 
+            {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
+    end;
+ 
 handle_call({dump, Path}, _From, State) -> 
-    {reply, 
-        {State#state.gtseq, do_dump(Path, State#state.dtree)}, 
-        State};
-
+    try
+        {reply, 
+            {State#state.gtseq, do_dump(Path, State#state.dtree)}, 
+            State}
+    catch
+        Exception:Reason -> 
+            {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
+    end;
+ 
 handle_call({deltas, Seq, Path}, _From, State) -> 
-    {reply, 
-        {State#state.gtseq, do_deltas(Seq, Path, State#state.dtree)}, 
-        State}.
+    try   
+        {reply, 
+            {State#state.gtseq, do_deltas(Seq, Path, State#state.dtree)}, 
+            State}
+    catch 
+        Exception:Reason -> 
+            {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
+    end.
     
 %%%%%%%%%%%%%%%%%%%%%%%%%% state tree implementation %%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -314,11 +345,11 @@ do_update([], PC, T, C) ->
             {ok, {_, Value}} ->     % already the value we are setting
                 {RC, Dict};
             _Else when is_list(Value) ->    % we're setting a proplist
-                {RCsub, NewDict} = do_update(binarify([Key]), Value, Dict, C),
+                {RCsub, NewDict} = do_update(atomify([Key]), Value, Dict, C),
                 {(RC++RCsub), NewDict};
             _Else -> 
                 {Seq, _} = C, 
-                {(RC++[{Key, Value}]), orddict:store(Key, {Seq, Value}, Dict)}
+                {(RC++[{Key, Value}]), orddict:store(atomify(Key), {Seq, Value}, Dict)}
         end
     end,
     { CL, Tnew } = orddict:fold(UF, {[], T}, PC),
@@ -384,7 +415,7 @@ do_deltas(Since, [], Tree) ->
             _ -> Val
         end
     end,
-    { orddict:map(FNrecurse, orddict:filter(FNfilter, Tree)) };
+    orddict:map(FNrecurse, orddict:filter(FNfilter, Tree));
 
 do_deltas(Since, [PH|PT], Tree) ->
     case orddict:find(PH, Tree) of
