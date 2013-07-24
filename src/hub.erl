@@ -170,7 +170,7 @@ handle_info(Msg, State) ->
 handle_cast(return, State) -> 
     {noreply, State}.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%% handle_call %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% handle_call %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 handle_call(terminate, _From, State) -> 
     {stop, normal, ok, State};
