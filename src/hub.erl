@@ -390,7 +390,7 @@ do_dump([PH|PT], Tree) ->
 
 %% do_deltas(Since, Path, Tree) -> ChangeTree
 %%
-%% returns a tree of changes that happened since the specified seq\tuence.
+%% returns a tree of changes that happened since the specified sequence.
 %% if a non-empty path is specified, returns changes relative to that path.
 %% returns these in a jiffy-compatible structure
 
