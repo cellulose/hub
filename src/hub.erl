@@ -62,9 +62,9 @@
          terminate/2]).
 
 -export([start_link/0, start/0]).
--export([request/2, request/3, update/2, update/3, watch/2, unwatch/1, 
-         manage/2, manager/1, fetch/0, fetch/1, dump/0, dump/1, deltas/1, 
-         deltas/2, binarify/1, atomify/1]).
+-export([request/2, request/3, update/2, update/3, watch/2, unwatch/1,
+        master/1, master/2, manage/2, manager/1, fetch/0, fetch/1, dump/0,
+        dump/1, deltas/1, deltas/2, binarify/1, atomify/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% Record Definitions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -103,6 +103,14 @@ update(Path, Changes, Context) ->
 
 %% interfaces to specify ownership and watching
 
+master(Path) ->
+    master(Path, []).
+    
+master(Path, Options) ->
+    update(Path, []),
+    manage(Path, Options),
+    watch(Path, []).
+    
 manage(Path, Options) -> 
   gen_server:call(?MODULE, {manage, atomify(Path), Options}).
 
