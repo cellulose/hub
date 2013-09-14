@@ -26,7 +26,7 @@ including "webmachine" from Basho, and "Cowboy" and "Ranch" from extend.
 The SSDP library is adapted from Ulf Archer's erlang eedia server. 
 
 The ECHO framework for NEMO, incluiding the state dictionary treehub.erl and it's interfacing
-to 
+to the world.
 
 
 
