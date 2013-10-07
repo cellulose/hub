@@ -311,6 +311,7 @@ do_watch([PH|PT], {From, Opts}, Tree) ->
     case orddict:find(PH, Tree) of 
         {ok, {Seq, ST}} ->
             case do_watch(PT, {From, Opts}, ST) of 
+
                 {error, Reason} -> {error, Reason};
                 {ok, STnew} -> {ok, orddict:store(PH, {Seq, STnew}, Tree)}
             end;
