@@ -1,33 +1,23 @@
-NEMO was adapted from the ideas and code of the ECHO project writen by Garth
-Hitchens, KG7GA, on his own time.   The parts of ECHO that are included in NEMO are © Copyright 2013 by Garth Hitchens, All Rights Reserved.
+NEMO is © Copyright 2013 Rose Point Navigation Systems, LLC.  All
+Rights Reserved.  NEMO is for now, a closed source project.
 
-Garth Hitchens explicitly grants a license to Rose Point Navigation Systems,
-LLC to use, maintain, modify, and enhance any code from ECHO as part of the
-NEMO Network Interface project, provided that enhancements to the
-non-marine-specific portions of the code are shared with Garth for inclusion in
-the generic ECHO platform.
+NEMO includes portions of the ECHO project, written by Garth Hitchens,
+KG7GA, which is open source and (as of this writing) licensed under
+the MIT license.
 
-NEMO is a trademark of Rose Point Navigation Systems, LLC, and the specific
-adaptations and specializations of ECHO for the marine market are © 2013 by
-Rose Point Navigation Systems, LLC.
+The ECHO project encompasses code and ideas related to the dictionary
+tree, hub implementation, notificaiton framework, state timestamping
+and archiving, web server, i/o drivers for non-marine devices, parser
+and generators, as well as stateful store-and-forward messaging.
 
-The ECHO project encompasses code and ideas related to the dictionary tree, hub
-implementation, notificaiton framework, state timestamping and archiving, and
-interfaces with the cowboy and webmachine frameworks, parser and generators, as well as stateful store-and-forward messaging.
-
-ECHO was derived from the author's previous work on the RemoteRadio project, 
-Copyright © 1997-2013 by Garth Hitchens, KG7GA.
+NEMO is a trademark of Rose Point Navigation Systems, LLC, and any
+specific adaptations and specializations of ECHO for the marine market
+are © 2013 by Rose Point Navigation Systems, LLC.
 
 INCLUSION OF OPEN SOURCE LICENSES
 
 Both NEMO and ECHO make heavy use of open source frameworks and libraries,
-including "webmachine" from Basho, and "Cowboy" and "Ranch" from extend.
+including "Cowboy" and "Ranch" from extend.
 
 The SSDP library is adapted from Ulf Archer's erlang eedia server. 
 
-The ECHO framework for NEMO, incluiding the state dictionary treehub.erl and it's interfacing
-to the world.
-
-
-
-TODO:	Include supporting licenses for the above frameworks
