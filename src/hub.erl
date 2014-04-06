@@ -50,8 +50,6 @@
 %% 
 %% License explicitly granted to Rose Point Navigation Systems, LLC, for use 
 %% in the NEMO network translator box.   For other uses contact the author.
-%%
-%% vim:et,ts=8,sts=4
 
 -module(hub).
 -behaviour(gen_server).
@@ -89,9 +87,9 @@ request(Path, Request) ->
     request(Path, Request, []).
   
 request(Path, Request, Context) ->
-  BinPath = atomify(Path),
-    {ok, {ManagerPID, _Opts}} = gen_server:call(?MODULE, {manager, BinPath}),
-    gen_server:call(ManagerPID, {request, BinPath, Request, Context}).
+  AtomicPath = atomify(Path),
+    {ok, {ManagerPID, _Opts}} = gen_server:call(?MODULE, {manager, AtomicPath}),
+    gen_server:call(ManagerPID, {request, AtomicPath, Request, Context}).
 
 %% interfaces to updating state
 
