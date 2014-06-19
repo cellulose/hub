@@ -1,23 +1,4 @@
-NEMO is © Copyright 2013 Rose Point Navigation Systems, LLC.  All
-Rights Reserved.  NEMO is for now, a closed source project.
+Currently not open source nor publicly licensed, although the intent is for that to change very soon.
+Contact the author for more information on licensing.
 
-NEMO includes portions of the ECHO project, written by Garth Hitchens,
-KG7GA, which is open source and (as of this writing) licensed under
-the MIT license.
-
-The ECHO project encompasses code and ideas related to the dictionary
-tree, hub implementation, notificaiton framework, state timestamping
-and archiving, web server, i/o drivers for non-marine devices, parser
-and generators, as well as stateful store-and-forward messaging.
-
-NEMO is a trademark of Rose Point Navigation Systems, LLC, and any
-specific adaptations and specializations of ECHO for the marine market
-are © 2013 by Rose Point Navigation Systems, LLC.
-
-INCLUSION OF OPEN SOURCE LICENSES
-
-Both NEMO and ECHO make heavy use of open source frameworks and libraries,
-including "Cowboy" and "Ranch" from extend.
-
-The SSDP library is adapted from Ulf Archer's erlang eedia server. 
-
+(C) Copyright 2012-2014 Garth Hitchens, KG7GA -- All Rights Reserved
