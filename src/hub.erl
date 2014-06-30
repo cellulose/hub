@@ -70,6 +70,7 @@
 
 -record(state, { 
         gtseq   = 0,                        % global transaction sequence #
+        vlock   = uuid:generate(),          % global uuid for this hub
         dtree   = orddict:new()             % the dictionary tree
     }).              
 
@@ -133,7 +134,7 @@ fetch() ->
   fetch([]).
 
 fetch(Path) ->
-  deltas(0, Path).
+  deltas({unknown, 0}, Path).
 
 deltas(Seq) -> 
   deltas(Seq, []).
@@ -233,7 +234,7 @@ handle_call({update, Path, Proposed, Auth}, From, State) ->
     try do_update(Path, Proposed, State#state.dtree, Ctx) of
         {Changed, NewTree} ->
             State2=State#state{dtree=NewTree, gtseq=Seq},
-            {reply, {changes, Seq, Changed}, State2}
+            {reply, {changes, {State2#state.vlock, Seq}, Changed}, State2}
     catch
         Exception:Reason -> 
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
@@ -242,7 +243,7 @@ handle_call({update, Path, Proposed, Auth}, From, State) ->
 handle_call({dump, Path}, _From, State) -> 
     try
         {reply, 
-            {State#state.gtseq, do_dump(Path, State#state.dtree)}, 
+            {{State#state.vlock, State#state.gtseq}, do_dump(Path, State#state.dtree)}, 
             State}
     catch
         Exception:Reason -> 
@@ -252,13 +253,25 @@ handle_call({dump, Path}, _From, State) ->
 handle_call({deltas, Seq, Path}, _From, State) -> 
     try   
         {reply, 
-            {State#state.gtseq, do_deltas(Seq, Path, State#state.dtree)}, 
+            {{State#state.vlock, State#state.gtseq}, 
+	     handle_vlocked_deltas(Seq, Path, State)}, 
             State}
     catch 
         Exception:Reason -> 
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end.
-    
+
+%% compares the passed lock and decides whether or not to return all deltas
+%% and a different vlock or use the vlock because it matches.
+
+handle_vlocked_deltas({Vlock, Since}, Path, State) ->
+    case State#state.vlock of
+        Vlock -> 
+	    do_deltas(Since, Path, State#state.dtree);
+	_ -> 
+	    do_deltas(0, Path, State#state.dtree)
+    end.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%% state tree implementation %%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% manage ownership of this point
