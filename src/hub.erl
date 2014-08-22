@@ -1,12 +1,12 @@
 %% hub - central state cache and update broker
 %%
 %% Implements a heirarchial key-value store with publish/watch semanitcs
-%% at each node of the heirarchy.   Plans to support timestamping, 
+%% at each node of the heirarchy.   Plans to support timestamping,
 %% version stamping, real-time playback, security,
 %%
 %% The hub holds a collection of dnodes (dictionary nodes).  Each dictionary
 %% node is a key/value store, where the keys are atoms, and the values
-%% are any erlang term.  Sometimes the value is also a dnode, which results 
+%% are any erlang term.  Sometimes the value is also a dnode, which results
 %% in a heirarchy.
 %%
 %% Processes publish state on a hub, watch to state changes,
@@ -14,10 +14,10 @@
 %% to the state.
 %%
 %% A hub is a process (a gen_server, actually) that holds state for the
-%% system, manages changes to state, and and routes notifications of 
+%% system, manages changes to state, and and routes notifications of
 %% changes of state.
 %%
-%% The hub keeps a sequence ID for each change to state, and this is 
+%% The hub keeps a sequence ID for each change to state, and this is
 %% stored as part of the state graph, so that the hub can answer the
 %% question:  "show me all state that has changed since sequence XXX"
 %%
@@ -42,13 +42,13 @@
 %% to binary keys internally (all keys are stored as binaries).    They will
 %% be represented as binary keys when returned.  This behavior is under review
 %% so if you want to be sure, pass binary keys to begin with.
-%% 
+%%
 %% LICENSE
 %%
 %% Repurposed from RemoteRadio, Copyright © 1996-2012 Garth Hitchens, KG7GA,
 %% and Telo, Copyright © 2012-2013 Garth Hitchens, All Rights Reserved
-%% 
-%% License explicitly granted to Rose Point Navigation Systems, LLC, for use 
+%%
+%% License explicitly granted to Rose Point Navigation Systems, LLC, for use
 %% in the NEMO network translator box.   For other uses contact the author.
 
 -module(hub).
@@ -56,7 +56,7 @@
 
 %% Exports to conform to gen_server behaviour
 
--export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, 
+-export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
          terminate/2]).
 
 -export([start_link/0, start/0]).
@@ -68,11 +68,11 @@
 
 %% dnodes are the core of the hub's storage and state mechanism
 
--record(state, { 
+-record(state, {
         gtseq   = 0,                        % global transaction sequence #
         vlock   = uuid:generate(),          % global uuid for this hub
         dtree   = orddict:new()             % the dictionary tree
-    }).              
+    }).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Public API %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -81,12 +81,12 @@
 start() ->      gen_server:start({local, ?MODULE}, ?MODULE, [], []).
 start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% request something from the manager of this point.  Note that requests 
+%% request something from the manager of this point.  Note that requests
 %% are sent from the caller's process, so that they don't block the hub.
 
 request(Path, Request) ->
     request(Path, Request, []).
-  
+
 request(Path, Request, Context) ->
   AtomicPath = atomify(Path),
     {ok, {ManagerPID, _Opts}} = gen_server:call(?MODULE, {manager, AtomicPath}),
@@ -94,7 +94,7 @@ request(Path, Request, Context) ->
 
 %% interfaces to updating state
 
-update(Path, Changes) -> 
+update(Path, Changes) ->
   update(Path, Changes, []).
 
 update(Path, Changes, Context) ->
@@ -104,22 +104,22 @@ update(Path, Changes, Context) ->
 
 master(Path) ->
     master(Path, []).
-    
+
 master(Path, Options) ->
     update(Path, []),
     manage(Path, Options),
     watch(Path, []).
-    
-manage(Path, Options) -> 
+
+manage(Path, Options) ->
   gen_server:call(?MODULE, {manage, atomify(Path), Options}).
 
-manager(Path) -> 
+manager(Path) ->
   gen_server:call(?MODULE, {manager, atomify(Path)}).
 
-watch(Path, Options) -> 
+watch(Path, Options) ->
   gen_server:call(?MODULE, {watch, atomify(Path), Options}).
 
-unwatch(Path) -> 
+unwatch(Path) ->
   gen_server:call(?MODULE, {unwatch, atomify(Path)}).
 
 %% interfaces to queries
@@ -127,8 +127,8 @@ unwatch(Path) ->
 dump() ->
   dump([]).
 
-dump(Path) ->           
-  gen_server:call(?MODULE, {dump, atomify(Path)}).     
+dump(Path) ->
+  gen_server:call(?MODULE, {dump, atomify(Path)}).
 
 fetch() ->
   fetch([]).
@@ -136,11 +136,11 @@ fetch() ->
 fetch(Path) ->
   deltas({unknown, 0}, Path).
 
-deltas(Seq) -> 
+deltas(Seq) ->
   deltas(Seq, []).
 
-deltas(Seq, Path) ->    
-  gen_server:call(?MODULE, {deltas, Seq, atomify(Path)}).      
+deltas(Seq, Path) ->
+  gen_server:call(?MODULE, {deltas, Seq, atomify(Path)}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% helpers %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -155,14 +155,14 @@ binarify(Atom) when is_atom(Atom) ->
   atom_to_binary(Atom, utf8);
 binarify(SomethingElse) ->
   SomethingElse.
-  
+
 atomify([H|T]) -> [atomify(H)|atomify(T)];
 atomify(Bin) when is_binary(Bin) -> binary_to_atom(Bin, utf8);
 atomify(SomethingElse) -> SomethingElse.
-  
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% gen_server callbacks %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(_Args) ->  {ok, #state{}}. 
+init(_Args) ->  {ok, #state{}}.
 
 terminate(normal, _State) -> ok.
 
@@ -174,22 +174,22 @@ handle_info(Msg, State) ->
     io:format("Unexpected message: ~p~n",[Msg]),
     {noreply, State}.
 
-handle_cast(return, State) -> 
+handle_cast(return, State) ->
     {noreply, State}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% handle_call %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-handle_call(terminate, _From, State) -> 
+handle_call(terminate, _From, State) ->
     {stop, normal, ok, State};
 
 handle_call({manage, Path, Opts}, From, State) ->
     try do_manage(Path, {From, Opts}, State#state.dtree) of
-        Tnew when is_list(Tnew) -> 
+        Tnew when is_list(Tnew) ->
             {reply, ok, State#state{dtree=Tnew}};
-        _ -> 
+        _ ->
             {reply, error, State}
     catch
-        Exception:Reason -> 
+        Exception:Reason ->
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
 
@@ -197,33 +197,33 @@ handle_call({manager, Path}, _From, State) ->
     try
         {reply, do_manager(Path, State#state.dtree), State}
     catch
-        Exception:Reason -> 
+        Exception:Reason ->
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
 
 handle_call({watch, Path, Opts}, From, State) ->
     try do_watch(Path, {From, Opts}, State#state.dtree) of
-        {ok, Tnew} when is_list(Tnew) -> 
+        {ok, Tnew} when is_list(Tnew) ->
             {reply, ok, State#state{dtree=Tnew}};
-        {error, Reason} -> 
+        {error, Reason} ->
             {reply, {error, Reason}, State}
     catch
-        Exception:Reason -> 
+        Exception:Reason ->
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
 
 handle_call({unwatch, Path}, From, State) ->
     try do_unwatch(Path, From, State#state.dtree) of
-        {ok, Tnew} when is_list(Tnew) -> 
+        {ok, Tnew} when is_list(Tnew) ->
             {reply, ok, State#state{dtree=Tnew}};
-        {error, Reason} -> 
+        {error, Reason} ->
             {reply, {error, Reason}, State}
     catch
-        Exception:Reason -> 
+        Exception:Reason ->
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
 
-handle_call({request, _Key, _Req}, _From, State) -> 
+handle_call({request, _Key, _Req}, _From, State) ->
     {reply, ok, State};
 
 %% Proposed     Proposed Changes
@@ -236,28 +236,28 @@ handle_call({update, Path, Proposed, Auth}, From, State) ->
             State2=State#state{dtree=NewTree, gtseq=Seq},
             {reply, {changes, {State2#state.vlock, Seq}, Changed}, State2}
     catch
-        Exception:Reason -> 
+        Exception:Reason ->
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
- 
-handle_call({dump, Path}, _From, State) -> 
+
+handle_call({dump, Path}, _From, State) ->
     try
-        {reply, 
-            {{State#state.vlock, State#state.gtseq}, do_dump(Path, State#state.dtree)}, 
+        {reply,
+            {{State#state.vlock, State#state.gtseq}, do_dump(Path, State#state.dtree)},
             State}
     catch
-        Exception:Reason -> 
+        Exception:Reason ->
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end;
- 
-handle_call({deltas, Seq, Path}, _From, State) -> 
-    try   
-        {reply, 
-            {{State#state.vlock, State#state.gtseq}, 
-	     handle_vlocked_deltas(Seq, Path, State)}, 
+
+handle_call({deltas, Seq, Path}, _From, State) ->
+    try
+        {reply,
+            {{State#state.vlock, State#state.gtseq},
+	     handle_vlocked_deltas(Seq, Path, State)},
             State}
-    catch 
-        Exception:Reason -> 
+    catch
+        Exception:Reason ->
             {reply, {Exception, Reason, erlang:get_stacktrace()}, State}
     end.
 
@@ -266,9 +266,9 @@ handle_call({deltas, Seq, Path}, _From, State) ->
 
 handle_vlocked_deltas({Vlock, Since}, Path, State) ->
     case State#state.vlock of
-        Vlock -> 
+        Vlock ->
 	    do_deltas(Since, Path, State#state.dtree);
-	_ -> 
+	_ ->
 	    do_deltas(0, Path, State#state.dtree)
     end.
 
@@ -280,8 +280,8 @@ handle_vlocked_deltas({Vlock, Since}, Path, State) ->
 
 do_manage([], {{FromPid, _Ref}, Opts}, Tree) ->
     orddict:store(mgr@, {FromPid, Opts}, Tree);
-            
-do_manage([PH|PT], {From, Opts}, Tree) -> 
+
+do_manage([PH|PT], {From, Opts}, Tree) ->
     {ok, {Seq, ST}} = orddict:find(PH, Tree),
     STnew = do_manage(PT, {From, Opts}, ST),
     orddict:store(PH, {Seq, STnew}, Tree).
@@ -291,7 +291,7 @@ do_manage([PH|PT], {From, Opts}, Tree) ->
 %% return the manageling process and options for a given point on the
 %% dictionary tree, if the manager was set by do_manage(...).
 
-do_manager([], Tree) -> 
+do_manager([], Tree) ->
     orddict:find(mgr@, Tree);
 
 do_manager([PH|PT], Tree) ->
@@ -299,7 +299,7 @@ do_manager([PH|PT], Tree) ->
     do_manager(PT, SubTree).
 
 %% do_watch(Path, Subscription, Tree)
-%% 
+%%
 %% Subscription is a {From, watchParameters} tuple that is placed on
 %% the wch@ key at a node in the dtree.  Adding a subscription doesn't
 %% currently cause any notificaitions, although that might change.
@@ -310,18 +310,18 @@ do_manager([PH|PT], Tree) ->
 
 do_watch([], {From, Opts}, Tree) ->
     {FromPid, _Ref} = From,
-    Subs = case orddict:find(wch@, Tree) of 
-        {ok, L} when is_list(L) -> 
+    Subs = case orddict:find(wch@, Tree) of
+        {ok, L} when is_list(L) ->
             orddict:store(FromPid, Opts, L);
-        _ -> 
+        _ ->
             orddict:store(FromPid, Opts, orddict:new())
     end,
     {ok, orddict:store(wch@, Subs, Tree)};
-        
-do_watch([PH|PT], {From, Opts}, Tree) -> 
-    case orddict:find(PH, Tree) of 
+
+do_watch([PH|PT], {From, Opts}, Tree) ->
+    case orddict:find(PH, Tree) of
         {ok, {Seq, ST}} ->
-            case do_watch(PT, {From, Opts}, ST) of 
+            case do_watch(PT, {From, Opts}, ST) of
 
                 {error, Reason} -> {error, Reason};
                 {ok, STnew} -> {ok, orddict:store(PH, {Seq, STnew}, Tree)}
@@ -339,15 +339,15 @@ do_unwatch([], Unsub, Tree) ->
     {ok, orddict:store(wch@, orddict:erase(FromPid, OldSubs), Tree)};
 
 do_unwatch([PH|PT], Unsub, Tree) ->
-    case orddict:find(PH, Tree) of 
+    case orddict:find(PH, Tree) of
         {ok, {Seq, ST}} ->
-            case do_unwatch(PT, Unsub, ST) of 
-                {error, Reason} -> {error, Reason}; 
+            case do_unwatch(PT, Unsub, ST) of
+                {error, Reason} -> {error, Reason};
                 {ok, STnew} -> {ok, orddict:store(PH, {Seq, STnew}, Tree)}
             end;
         _ -> {error, nopoint}
     end.
-        
+
 %% update(PathList,ProposedChanges,Tree,Context) -> {ResultingChanges,NewTree}
 %%
 %% Coding Abbreviations:
@@ -355,45 +355,45 @@ do_unwatch([PH|PT], Unsub, Tree) ->
 %% PC,RC    Proposed Changes, Resulting Changes (these are trees)
 %% P,PH,PT  Path/Path Head/ Path Tail
 %% T,ST     Tree,SubTree
-%% C        Context - of the form {Seq, Whatever} where whatever is 
+%% C        Context - of the form {Seq, Whatever} where whatever is
 %%          any erlang term - gets threaded unmodified through update
-    
-do_update([], PC, T, C) -> 
+
+do_update([], PC, T, C) ->
     %io:format("update([],~p,~p)\n\n", [PC, T]),
     UF = fun(Key, Value, {RC, Dict}) -> % {RC, Dict}
-        case orddict:find(Key, Dict) of  
+        case orddict:find(Key, Dict) of
             {ok, {_, Value}} ->     % already the value we are setting
                 {RC, Dict};
             _Else when is_list(Value) ->    % we're setting a proplist
                 {RCsub, NewDict} = do_update(atomify([Key]), Value, Dict, C),
                 {(RC++RCsub), NewDict};
-            _Else -> 
-                {Seq, _} = C, 
+            _Else ->
+                {Seq, _} = C,
                 {(RC++[{Key, Value}]), orddict:store(atomify(Key), {Seq, Value}, Dict)}
         end
     end,
     { CL, Tnew } = orddict:fold(UF, {[], T}, PC),
     send_notifications(CL, Tnew, C),
     { CL, Tnew };
-    
+
 do_update([PH|PT], PC, T, C) ->
     % we still have a path, so update a subtree of the given tree
-    ST = case orddict:find(PH, T) of 
+    ST = case orddict:find(PH, T) of
         {ok, {_Seq, L}} when is_list(L) ->  L;  % found existing subtree
         {ok, _} ->  % replace current non-list value with new subtree
-            orddict:new();  
+            orddict:new();
         error ->    % add new subtree (key didn't exist before)
-            orddict:new() 
-    end,    
-    % recurse to update the subtree 
+            orddict:new()
+    end,
+    % recurse to update the subtree
     {RCsub, STnew} = do_update(PT, PC, ST, C),
     RC = case RCsub of
         [] -> [];
         Y ->  [{PH, Y}]
-    end,    
+    end,
     % store sequence number for this change
-    {Seq, _} = C, 
-    % store new subtree and sequence number 
+    {Seq, _} = C,
+    % store new subtree and sequence number
     T1 = orddict:store(PH, {Seq, STnew}, T),
     send_notifications(RC, T1, C),
     { RC, T1 }.
@@ -403,7 +403,7 @@ do_update([PH|PT], PC, T, C) ->
 %% Lookup the state dictionary tree at a given path.  Returns the entire
 %% tree, including subscription and version information.
 
-do_dump([], Tree) -> Tree;  
+do_dump([], Tree) -> Tree;
 do_dump([PH|PT], Tree) ->
     {ok, {_Seq, SubTree}} = orddict:find(PH, Tree),
     do_dump(PT, SubTree).
@@ -418,7 +418,7 @@ do_deltas(Since, [], Tree) ->
     % FN to filter a list of nodes whose seq# is higher than Since
     % also removing subscription nodes REVIEW: likely should be an option?
     FNfilter = fun(Key, Val) ->
-        case {Key, Val} of 
+        case {Key, Val} of
             {mgr@, _} -> false;
             {wch@, _} -> false;
             {Key, {Seq, _Val}} -> (Seq > Since);
@@ -427,10 +427,10 @@ do_deltas(Since, [], Tree) ->
     end,
     % function to map subnodes to recurse to do_deltas
     FNrecurse = fun(Key, {_Seq, Val}) ->
-        case {Key, Val} of 
+        case {Key, Val} of
             {wch@, _} -> Val;
             {mgr@, _} -> Val;
-            {_, L} when is_list(L) -> 
+            {_, L} when is_list(L) ->
                 do_deltas(Since, [], L);
             _ -> Val
         end
@@ -439,13 +439,13 @@ do_deltas(Since, [], Tree) ->
 
 do_deltas(Since, [PH|PT], Tree) ->
     case orddict:find(PH, Tree) of
-        {ok, {_Seq, SubTree}} when is_list(SubTree) -> 
+        {ok, {_Seq, SubTree}} when is_list(SubTree) ->
             do_deltas(Since, PT, SubTree);
         _Else -> error
     end.
 
 %% called by do_update to send notification to watchers (wch@).
-%%  
+%%
 %% send notifications about some changes to watchrs.   If nothing changed,
 %% then don't send any notifications.
 
@@ -453,8 +453,8 @@ send_notifications([], _, _) -> pass;
 send_notifications(Changes, Tree, Context) ->
     case orddict:find(wch@, Tree) of
         {ok, Subs} when is_list(Subs) ->
-            orddict:map(fun(Pid, Opts) -> 
+            orddict:map(fun(Pid, Opts) ->
                 Pid ! {notify, Opts, Changes, Context}
             end, Subs);
         _ -> pass
-    end.    
+    end.
