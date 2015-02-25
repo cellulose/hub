@@ -232,6 +232,8 @@ handle_call({update, Path, Proposed, Auth}, From, State) ->
     Seq = State#state.gtseq + 1,
     Ctx = {Seq, [{from, From}, {auth, Auth}]},
     try do_update(Path, Proposed, State#state.dtree, Ctx) of
+			  {[], _} ->
+					{reply, {nochanges, {State#state.vlock, State#state.gtseq}, []}, State};
         {Changed, NewTree} ->
             State2=State#state{dtree=NewTree, gtseq=Seq},
             {reply, {changes, {State2#state.vlock, Seq}, Changed}, State2}
@@ -387,16 +389,16 @@ do_update([PH|PT], PC, T, C) ->
     end,
     % recurse to update the subtree
     {RCsub, STnew} = do_update(PT, PC, ST, C),
-    RC = case RCsub of
-        [] -> [];
-        Y ->  [{PH, Y}]
-    end,
-    % store sequence number for this change
-    {Seq, _} = C,
-    % store new subtree and sequence number
-    T1 = orddict:store(PH, {Seq, STnew}, T),
-    send_notifications(RC, T1, C),
-    { RC, T1 }.
+    case RCsub of
+        [] -> % no changes to subtree, so don't store new sequence#
+					{ [], T };
+        Y ->  % store new subtree and sequence number for this change
+					RC = [{PH, Y}],
+			    {Seq, _} = C,
+			    T1 = orddict:store(PH, {Seq, STnew}, T),
+			    send_notifications(RC, T1, C),
+			    { RC, T1 }
+    end.
 
 %% do_dump(Path, Tree) -> Tree
 %%
