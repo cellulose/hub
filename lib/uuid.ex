@@ -1,5 +1,17 @@
 defmodule Uuid do
+  @moduledoc """
+  Simple UUID generator for Hub
+  """
 
+  @doc """
+  Generates a uuid
+
+  ## Examples
+  ```
+  iex>Uuid.generate
+  "05142fbc0511bc41D156CD4C605CF0C0"
+  ```
+  """
   def generate do
     now = {_, _, micro} = :erlang.now
     nowish = :calendar.now_to_universal_time(now)

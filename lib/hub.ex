@@ -45,6 +45,24 @@ defmodule Hub do
    to binary keys internally (all keys are stored as binaries).    They will
    be represented as binary keys when returned.  This behavior is under review
    so if you want to be sure, pass binary keys to begin with.
+
+   ## Examples
+
+   Basic Usage:
+
+       # Start the Hub GenServer
+       iex> Hub.start
+       {:ok, #PID<0.127.0>}
+       # Put [status: :online] at path [:some, :point]
+       iex(2)> Hub.put [:some,:point], [status: :online]
+       {:changes, {"05142ef7fe86a86D2471CA6869E19648", 1},
+       [some: [point: [status: :online]]]}
+       # Fetch all values at path [:some, :point]
+       Hub.fetch [:some, :point]
+       {{"05142ef7fe86a86D2471CA6869E19648", 1}, [status: :online]}
+       # Get particular value :status at [:some, :point]
+       Hub.get [:some, :point], :status
+       :online
   """
 
   require Logger
@@ -53,17 +71,18 @@ defmodule Hub do
   use GenServer
 
   defmodule State do
+    @moduledoc false
     @derive [Access]
     defstruct gtseq: 0, vlock: Uuid.generate, dtree: :orddict.new
   end
 
   @proc_path_key {:agent, :path}
-  
+
   @doc false
   def start() do
     start([],[])
   end
-  
+
   @doc false
   def start_link() do
     start_link([], [])
@@ -81,16 +100,43 @@ defmodule Hub do
 
   ############################### PUBLIC API ###################################
 
+  @doc """
+  Request a change to the path in the hub. The Manager is forwarded the request
+  and is responsible for handling it. If no manager is found a timeout will
+  occur.
+
+  ## Examples
+
+  ```
+  iex> Hub.request [:some, :point], [useful: :info]
+  {:changes, {"0513b7725c5436E67975FB3A13EB3BAA", 2},
+   [some: [point: [useful: :info]]]}
+  ```
+  """
   def request(path, request, context \\ []) do
     atomic_path = atomify(path)
     {:ok, {manager_pid, _opts}} = GenServer.call(__MODULE__, {:manager, atomic_path})
     GenServer.call(manager_pid, {:request, atomic_path, request, context})
   end
 
+  @doc """
+  Updates the path with the changes provided.
+
+  ## Examples
+  ```
+  iex> Hub.update [:some, :point], [some: :data]
+  {:changes, {"05142ef7fe86a86D2471CA6869E19648", 1},
+   [some: [point: [some: :data]]]}
+  ```
+  """
   def update(path, changes, context \\ []) do
     GenServer.call(__MODULE__, {:update, atomify(path), changes, context})
   end
 
+  @doc """
+  Same as `update/3` except no context argument. See `update/3` for more
+  information
+  """
   def put(path, changes) do
     update(path, changes)
   end
@@ -98,7 +144,16 @@ defmodule Hub do
   @doc """
   Associate the currrent process as the primary agent for the given
   path.  This binds/configures this process to the hub, and also sets
-  the path as the "agent path" in the process dictionary
+  the path as the "agent path" in the process dictionary.
+
+  *Note:* The path provided must exist and have values stored before trying
+  to master it.
+
+  ## Examples
+
+  ```
+  iex> Hub.master [:some, :point]
+  :ok
   """
   def master(path, options \\ []) do
     Process.put @proc_path_key, path
@@ -107,15 +162,43 @@ defmodule Hub do
     watch(path, [])
   end
 
-  def manage(path, options) do
+  @doc """
+  Similar to `master/2` but does not `watch` the path.
+
+  ## Examples
+
+  ```
+  iex> Hub.manage [:some, :point], []
+  :ok
+  ```
+  """
+  def manage(path, options \\ []) do
     GenServer.call(__MODULE__, {:manage, atomify(path), options})
   end
 
+  @doc """
+  Retrieves the manager with options for the provided path.
+
+  ## Examples
+
+  ```
+  iex> Hub.manager [:some, :point]
+  {:ok, {#PID<0.125.0>, []}}
+  ```
+  """
   def manager(path) do
     GenServer.call(__MODULE__, {:manager, atomify(path)})
   end
 
-  @doc "Returns the controlling agent for this path, or nil if none"
+  @doc """
+  Returns the controlling agent for this path, or nil if none
+
+  ## Examples
+  ```
+  iex> Hub.agent [:some, :point]
+  #PID<0.125.0>
+  ```
+  """
   def agent(path) do
     case manager(path) do
       {:ok, {pid, _opts} } -> pid
@@ -123,50 +206,118 @@ defmodule Hub do
     end
   end
 
+  @doc """
+  Adds the calling process to the @wch list of process to get notified of
+  changes to the path specified.
+
+  ## Examples
+  ```
+  iex> Hub.watch [:some, :point]
+  :ok
+  ```
+  """
   def watch(path, options \\ []) do
     GenServer.call(__MODULE__, {:watch, atomify(path), options})
   end
 
+  @doc """
+  Removes the calling process from the @wch list of process to stop getting
+  notified of changes to the path specified.
+
+  ## Examples
+  ```
+  iex> Hub.unwatch [:some, :point]
+  :ok
+  ```
+  """
   def unwatch(path) do
     GenServer.call(__MODULE__, {:unwatch, atomify(path)})
   end
 
+  @doc """
+  Dumps the entire contents of the hub graph, including "non human" information.
+
+  ## Examples
+  ```
+  iex> Hub.dump
+  {{"05142ef7fe86a86D2471CA6869E19648", 1},
+    [some: {1, [point: {1, [mgr@: {#PID<0.125.0>, []}, some: {1, :data}]}]}]}
+  ```
+  """
   def dump(path \\ []) do
     GenServer.call(__MODULE__, {:dump, atomify(path)})
   end
 
+  @doc """
+  Gets the value at the specified path with the specified key.
+
+  ## Examples
+  ```
+  iex> Hub.get [:some, :point], :status
+  :online
+  ```
+  """
   def get(path, key) do
     {_vers, dict} = fetch(path)
     Dict.get dict, key
   end
 
+  @doc """
+  Gets all the "human readable" key values pairs at the specified path.
+
+  ## Examples
+  ```
+  iex>Hub.fetch [:some, :point]
+  {{"05142ef7fe86a86D2471CA6869E19648", 1}, [some: :data]}
+  ```
+  """
   def fetch(path \\ []), do: deltas({:unknown, 0}, path)
 
+  @doc """
+  Gets the changes from the provided sequence counter on the path to its current
+  state.
+
+  The sequence counter is retured on calls to `get/1`, `put/2`, `update/3`,
+  `dump/1`, `fetch/1`
+
+  ## Examples
+  ```
+  iex> Hub.deltas 2, [:some, :path]
+  {{"05142f977e209de63a768684291be964", 2}, [some: :new_data]}
+  ```
+  """
   def deltas(seq, path \\ []) do
     GenServer.call(__MODULE__, {:deltas, seq, atomify(path)})
   end
 
   ########################## GenServer Callbacks ###############################
+  @doc false
   def init(_args), do: {:ok, %State{}}
 
+  @doc false
   def terminate(:normal, _state), do: :ok
   def terminate(reason, _state), do: reason
 
+  @doc false
   def code_change(_old_ver, state, _extra), do: {:ok, state}
 
+  @doc false
   def handle_info(msg, state) do
     Logger.debug "#{__MODULE__} got unexpected message: #{inspect msg}"
     {:noreply, state}
   end
 
+  @doc false
   def handle_cast(:return, state), do: {:noreply, state}
 
   ############################## handle_call ###################################
 
+  @doc false
   def handle_call(:terminate, _from, state) do
     {:stop, :normal, :ok, state}
   end
 
+  @doc false
   def handle_call({:manage, path, opts}, from, state) do
     case do_manage(path, {from, opts}, state.dtree) do
       tnew when is_list(tnew) ->
@@ -176,10 +327,12 @@ defmodule Hub do
     end
   end
 
+  @doc false
   def handle_call({:manager, path}, _from, state) do
     {:reply, do_manager(path, state.dtree), state}
   end
 
+  @doc false
   def handle_call({:watch, path, opts}, from, state) do
     case do_watch(path, {from, opts}, state.dtree) do
       {:ok, tnew} when is_list(tnew) ->
@@ -189,6 +342,7 @@ defmodule Hub do
     end
   end
 
+  @doc false
   def handle_call({:unwatch, path}, from, state) do
     case do_unwatch(path, from, state.dtree) do
       {:ok, tnew} when is_list(tnew) ->
@@ -198,10 +352,12 @@ defmodule Hub do
     end
   end
 
+  @doc false
   def handle_call({:request, _key, _req}, _from, state) do
     {:reply, :ok, state}
   end
 
+  @doc false
   def handle_call({:update, path, proposed, auth}, from, state) do
     seq = state.gtseq + 1
     ctx = {seq, [from: from, auth: auth]} #REVIEW .erl 233
@@ -214,14 +370,18 @@ defmodule Hub do
     end
   end
 
+  @doc false
   def handle_call({:dump, path}, _from, state) do
     {:reply, {{state.vlock, state.gtseq}, do_dump(path, state.dtree)},state}
   end
 
+  @doc false
   def handle_call({:deltas, seq, path}, _from, state) do
     {:reply, {{state.vlock, state.gtseq}, handle_vlocked_deltas(seq, path, state)}, state}
   end
 
+  # Breaks apart the vlock information and calls do_deltas with the version
+  # found or since the start (version 0)
   defp handle_vlocked_deltas({cur_vlock, since}, path, state) do
     case state.vlock do
       vlock when vlock == cur_vlock -> do_deltas(since, path, state.dtree)
@@ -395,6 +555,7 @@ defmodule Hub do
     end
   end
 
+  # Send notification to all watchers who called `watch/1`
   defp send_notifications([], _, _), do: :pass
   defp send_notifications(changes, tree, context) do
     case :orddict.find(:wch@, tree) do
@@ -405,18 +566,18 @@ defmodule Hub do
       _ -> :pass
     end
   end
-  
-  ################################ HELPERS #####################################
 
-  @doc "Converts a point in the hub to a path (url) in the hub"
+  # Converts a point (path) to a url
   defp pt_to_url(pt) do
     "/" <> Enum.map_join(pt, "/", &(Atom.to_string(&1)))
   end
 
+  # converts an atom (or list of atoms) to binaries
   defp binarify([h|t]), do: [binarify(h) | binarify(t)]
   defp binarify(a) when is_atom(a), do: Atom.to_string(a)
   defp binarify(o), do: o
 
+  # converts a binary (or list of binaries) to atoms
   defp atomify([h|t]), do: [atomify(h) | atomify(t)]
   defp atomify(s) when is_binary(s), do: String.to_atom(s)
   defp atomify(o), do: o
