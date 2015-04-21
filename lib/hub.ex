@@ -1,5 +1,4 @@
 defmodule Hub do
-
   @moduledoc """
    Central state cache and update broker
 
@@ -433,7 +432,7 @@ defmodule Hub do
       {:ok, l} when is_list(l) ->
         :orddict.store(from_pid, opts, l)
       _ ->
-        :orddict.store(from_pid, opts, :orddict.new)
+        :orddict.store(from_pid, opts, :orddict.new())
     end
     {:ok, :orddict.store(:wch@, subs, tree)}
   end
@@ -443,7 +442,7 @@ defmodule Hub do
       {:ok, {seq, st}} ->
         case do_watch(t, {from, opts}, st) do
           {:ok, stnew} ->
-            {:ok, :orddict.store(h, {seq, st}, tree)}
+            {:ok, :orddict.store(h, {seq, stnew}, tree)}
           {:error, reason} -> {:error, reason}
         end
       _ -> {:error, :nopoint}
