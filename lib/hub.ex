@@ -536,11 +536,11 @@ defmodule Hub do
     end
     fn_recurse = fn(key, {_seq, val}) ->
       case {key, val} do
-        {:wch@, _} -> val
-        {:mgr@, _} -> val
+        {:wch@, value} -> value
+        {:mgr@, value} -> value
         {_, l} when is_list(l) ->
           do_deltas(since, [], l)
-        _ -> val
+        value -> value
       end
     end
     :orddict.map(fn_recurse, :orddict.filter(fn_filter, tree))
