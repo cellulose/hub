@@ -11,6 +11,10 @@ defmodule Hub.Mixfile do
     deps: deps
   ]
 
+  def application, do: [
+    mod: { Hub, []}
+  ]
+
   defp deps, do: [
     {:earmark, "~> 0.1", only: :dev},
     {:ex_doc, "~> 0.7", only: :dev}
