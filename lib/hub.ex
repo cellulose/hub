@@ -540,7 +540,7 @@ defmodule Hub do
         {:mgr@, value} -> value
         {_, l} when is_list(l) ->
           do_deltas(since, [], l)
-        value -> value
+        _ -> val
       end
     end
     :orddict.map(fn_recurse, :orddict.filter(fn_filter, tree))
@@ -567,14 +567,14 @@ defmodule Hub do
   end
 
   # Converts a point (path) to a url
-  defp pt_to_url(pt) do
+  def pt_to_url(pt) do
     "/" <> Enum.map_join(pt, "/", &(Atom.to_string(&1)))
   end
-
-  # converts an atom (or list of atoms) to binaries
-  defp binarify([h|t]), do: [binarify(h) | binarify(t)]
-  defp binarify(a) when is_atom(a), do: Atom.to_string(a)
-  defp binarify(o), do: o
+  #
+  # # converts an atom (or list of atoms) to binaries
+  # defp binarify([h|t]), do: [binarify(h) | binarify(t)]
+  # defp binarify(a) when is_atom(a), do: Atom.to_string(a)
+  # defp binarify(o), do: o
 
   # converts a binary (or list of binaries) to atoms
   defp atomify([h|t]), do: [atomify(h) | atomify(t)]
