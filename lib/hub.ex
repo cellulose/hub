@@ -536,8 +536,8 @@ defmodule Hub do
     end
     fn_recurse = fn(key, {_seq, val}) ->
       case {key, val} do
-        {:wch@, value} -> value
-        {:mgr@, value} -> value
+        {:wch@, _} -> val
+        {:mgr@, _} -> val
         {_, l} when is_list(l) ->
           do_deltas(since, [], l)
         _ -> val
