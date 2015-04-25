@@ -87,12 +87,12 @@ defmodule Hub do
     start_link([], [])
   end
 
-  @doc false
+  @doc "Start the Hub GenServer"
   def start(_,_) do
     GenServer.start(__MODULE__, [], name: __MODULE__)
   end
 
-  @doc false
+  @doc "Start the Hub GenServer with link to calling process"
   def start_link(_,_) do
     GenServer.start(__MODULE__, [], name: __MODULE__)
   end
@@ -281,8 +281,11 @@ defmodule Hub do
 
   ## Examples
   ```
-  iex> Hub.deltas 2, [:some, :path]
+  iex> Hub.deltas {"05142f977e209de63a768684291be964", 1}, [:some, :path]
   {{"05142f977e209de63a768684291be964", 2}, [some: :new_data]}
+
+  iex> Hub.deltas {:undefined, 0}, [:some, :path]
+  #Returns all changes
   ```
   """
   def deltas(seq, path \\ []) do
