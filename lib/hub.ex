@@ -491,7 +491,7 @@ defmodule Hub do
         {:ok, {_, val}} when val == value ->
           {rc, dict}
         _ when is_list(value) ->
-          {rcsub, new_dict} = do_update(atomify(key), value, dict, c)
+          {rcsub, new_dict} = do_update(atomify([key]), value, dict, c)
           {(rc ++ rcsub), new_dict}
         _ ->
           {seq, _} = c
