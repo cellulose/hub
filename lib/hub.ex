@@ -363,7 +363,7 @@ defmodule Hub do
   def handle_call({:update, path, proposed, auth}, from, state) do
     seq = state.gtseq + 1
     ctx = {seq, [from: from, auth: auth]} #REVIEW .erl 233
-    case do_update(path, proposed, state.dtree, ctx) do
+    case do_update(path, Dict.to_list(proposed), state.dtree, ctx) do
       {[], _} ->
         {:reply, {:nochanges, {state.vlock, state.gtseq}, []}, state}
       {changed, new_tree} ->
@@ -402,11 +402,16 @@ defmodule Hub do
   end
 
   defp do_manage([h|t], {from, opts}, tree) do
-    {:ok, {seq, st}} = :orddict.find(h, tree)
-    stnew = do_manage(t, {from, opts}, st)
-    :orddict.store(h, {seq, stnew}, tree)
+    case :orddict.find(h, tree) do
+      :error -> nil
+      {:ok, {seq, st}} ->
+        stnew = do_manage(t, {from, opts}, st)
+        :orddict.store(h, {seq, stnew}, tree)
+    end
   end
 
+  defp do_manage(point, f, tree), do: do_manage([point], f, tree)
+ 
   ## do_manager(Point, Tree) -> {ok, {Process, Options}} | undefined
   ##
   ## return the manageling process and options for a given point on the
@@ -415,9 +420,13 @@ defmodule Hub do
   defp do_manager([], tree), do: :orddict.find(:mgr@, tree)
 
   defp do_manager([h|t], tree) do
-    {:ok, {_seq, sub_tree}} = :orddict.find(h, tree)
-    do_manager(t, sub_tree)
+    case :orddict.find(h, tree) do
+      :error -> nil
+      {:ok, {_seq, sub_tree}} -> do_manager(t, sub_tree)
+    end
   end
+
+  defp do_manager(point, tree), do: do_manager([point], tree) 
 
   ## do_watch(Path, Subscription, Tree)
   ##
